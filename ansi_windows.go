@@ -23,7 +23,7 @@ func enableANSI() {
 	setInCP.Call(65001)
 	for _, f := range []*os.File{os.Stdout, os.Stderr} {
 		var m uint32
-		if r, _, _ := getMode.Call(f.Fd(), uintptr(unsafe.Pointer(&m))); r != 0 {
+		if r, _, _ := getMode.Call(f.Fd(), uintptr(unsafe.Pointer(&m))); r == 0 {
 			setMode.Call(f.Fd(), uintptr(m|0x0004))
 		}
 	}

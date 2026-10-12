@@ -128,7 +128,7 @@ func main() {
 		}
 	}()
 
-	printWordmark()
+	printSplashScreen()
 	rd := bufio.NewReader(os.Stdin)
 	var src, name string
 	var local bool

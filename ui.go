@@ -12,11 +12,11 @@ import (
 
 var (
 	reset, bold, dim, accent, green, red, yellow, subtle, selBg string
-
-	ansiRe   = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
-	anim     = true
-	asciiSym = false
-	useColor = true
+	cyan, magenta, orange, navy, white                          string
+	ansiRe                                                      = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
+	anim                                                        = true
+	asciiSym                                                    = false
+	useColor                                                    = true
 )
 
 type glyphs struct {
@@ -42,7 +42,14 @@ func initTheme() {
 		green = rgb(152, 195, 121)
 		red = rgb(224, 108, 117)
 		yellow = rgb(209, 154, 102)
+		cyan = rgb(86, 180, 233)
+		magenta = rgb(198, 120, 221)
+		orange = rgb(229, 192, 123)
 		selBg = "\x1b[48;2;36;41;54m"
+		// Palette taken from the Neovim-style reference image:
+		// deep royal blue frame lines, bright cyan wordmark, soft white body text.
+		navy = rgb(45, 70, 165)
+		white = rgb(206, 206, 206)
 	}
 	if asciiSym {
 		g = glyphs{
@@ -54,7 +61,7 @@ func initTheme() {
 		return
 	}
 	g = glyphs{
-		spin: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		spin: []string{"⠋", "⠙", "⠹", "", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		ok:   "✓", bad: "✕", pend: "·", barOn: "━", barOff: "─", mark: "▌",
 		on: "■", off: "□", minus: "−", ell: "…", arrow: "›", sep: "·", rule: "─",
 		up: "↑", down: "↓",
@@ -336,9 +343,63 @@ func printFail(msg string) {
 	fmt.Println("  " + red + g.bad + reset + " " + msg)
 }
 
+func printSplashScreen() {
+	// CODEDIFF wordmark, ANSI Shadow block style (same family as the old art).
+	lines := []string{
+		"  ██████╗  ██████╗ ██████╗ ███████╗██████╗ ██╗███████╗███████╗",
+		" ██╔════╝ ██╔═══██╗██╔══██╗██╔════╝██╔══██╗██║██╔════╝██╔════╝",
+		" ██║      ██║   ██║██║  ██║█████╗  ██║  ██║██║█████╗  █████╗  ",
+		" ██║      ██║   ██║██║  ██║██╔══╝  ██║  ██║██║██╔══╝  ██╔══╝  ",
+		" ╚██████╗ ╚██████╔╝██████╔╝███████╗██████╔╝██║██║     ██║     ",
+		"  ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝╚═════╝ ╚═╝██║     ██║     ",
+	}
+
+	// Vertical cyan glow, matching the bright-cyan wordmark in the
+	// reference image: light highlight on top, bright core, teal shading
+	// at the bottom edge.
+	rowColors := []string{
+		rgb(150, 250, 250),
+		rgb(0, 236, 236),
+		rgb(0, 224, 224),
+		rgb(0, 224, 224),
+		rgb(0, 176, 176),
+		rgb(0, 132, 132),
+	}
+
+	const inner = 65 // box interior width (61-col art + 2-space padding)
+	top := navy + "╔" + strings.Repeat("═", inner) + "╗" + reset
+	sep := navy + "╠" + strings.Repeat("═", inner) + "╣" + reset
+	bot := navy + "╚" + strings.Repeat("═", inner) + "╝" + reset
+	row := func(content string) string {
+		pad := inner - visLen(content)
+		if pad < 0 {
+			pad = 0
+		}
+		return navy + "║" + reset + content + strings.Repeat(" ", pad) + navy + "║" + reset
+	}
+	blank := row("")
+
+	fmt.Println()
+	fmt.Println("  " + top)
+	fmt.Println("  " + blank)
+	for i, line := range lines {
+		fmt.Println("  " + row("  "+rowColors[i]+line+reset))
+	}
+	fmt.Println("  " + blank)
+	fmt.Println("  " + sep)
+	fmt.Println("  " + row("  "+bold+white+"GitHub Commit Browser & Code Comparator"+reset))
+	fmt.Println("  " + row("  " + dim + "v1.0  ·  Written in Go  ·  No dependencies" + reset))
+	fmt.Println("  " + sep)
+	fmt.Println("  " + row("  "+cyan+"[+]"+reset+" "+dim+"Browse full commit history with search"+reset))
+	fmt.Println("  " + row("  "+magenta+"[>]"+reset+" "+dim+"Compare old vs new code side-by-side"+reset))
+	fmt.Println("  " + row("  "+cyan+"[>]"+reset+" "+dim+"GitHub-style diff with green/red highlights"+reset))
+	fmt.Println("  " + row("  "+magenta+"[>]"+reset+" "+dim+"Select files with checkbox & copy to clipboard"+reset))
+	fmt.Println("  " + row("  "+cyan+"[>]"+reset+" "+dim+"Works on Windows, macOS, and Linux"+reset))
+	fmt.Println("  " + blank)
+	fmt.Println("  " + bot)
+	fmt.Println()
+}
+
 func printWordmark() {
-	fmt.Println()
-	fmt.Println("  " + bold + "codediff" + reset + "  " + dim + "v1.0" + reset)
-	fmt.Println("  " + dim + "Telusuri riwayat commit, bandingkan versi lama dan baru, lalu salin kodenya." + reset)
-	fmt.Println()
+	printSplashScreen()
 }

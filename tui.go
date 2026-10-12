@@ -156,7 +156,6 @@ func draw(lines []string, w, h int) {
 }
 
 func bodyLine(s string, w int) string { return "   " + truncate(s, inner(w)) }
-
 func ruleLine(w int) string { return " " + rule(w-3) }
 
 func joinLR(left, right string, width int) string {
@@ -337,9 +336,9 @@ func (s *listState) render(r *Repo, w, h, rows int) []string {
 	if s.query != "" || s.typing {
 		q := clean(s.query)
 		if s.typing {
-			q += "▏"
+			q += ""
 		}
-		right = fmt.Sprintf("cari “%s”  %s  %s dari %s", q, g.sep, num(len(s.idx)), num(len(s.all)))
+		right = fmt.Sprintf(`cari "%s"  %s  %s dari %s`, q, g.sep, num(len(s.idx)), num(len(s.all)))
 		if asciiSym {
 			right = fmt.Sprintf("cari \"%s\"  -  %s dari %s", q, num(len(s.idx)), num(len(s.all)))
 		}
@@ -509,7 +508,7 @@ func (d *detailState) clamp(rows int) {
 func (d *detailState) selected() []File {
 	var out []File
 	for i, f := range d.c.Files {
-		if d.sel[i] {
+		if i < len(d.sel) && d.sel[i] {
 			out = append(out, f)
 		}
 	}
@@ -534,8 +533,8 @@ func (d *detailState) render(r *Repo, w, h, rows int) []string {
 	cbW := visLen(g.on)
 	pathW := imax(10, in-(cbW+4)-2-15)
 	count := 0
-	for _, s := range d.sel {
-		if s {
+	for i, s := range d.sel {
+		if i < len(c.Files) && s {
 			count++
 		}
 	}
@@ -564,7 +563,7 @@ func (d *detailState) render(r *Repo, w, h, rows int) []string {
 		}
 		f := c.Files[pos]
 		cb := dim + g.off + reset
-		if d.sel[pos] {
+		if pos < len(d.sel) && d.sel[pos] {
 			cb = accent + g.on + reset
 		}
 		p := truncLeft(clean(f.Path), pathW)
@@ -576,7 +575,7 @@ func (d *detailState) render(r *Repo, w, h, rows int) []string {
 			base = bold + base + reset
 		}
 		pathCol := dim + dir + reset + base
-		if !d.sel[pos] {
+		if pos >= len(d.sel) || !d.sel[pos] {
 			pathCol = dim + dir + base + reset
 		}
 		right := padL(green+"+"+num(f.Add)+reset, 7) + padL(red+g.minus+num(f.Del)+reset, 8)
@@ -666,7 +665,7 @@ func detailScreen(r *Repo, c Commit) bool {
 		case kEnd:
 			d.cur = n - 1
 		case kSpace:
-			if n > 0 {
+			if n > 0 && d.cur >= 0 && d.cur < n && d.cur < len(d.sel) {
 				d.sel[d.cur] = !d.sel[d.cur]
 			}
 		case kTab:
@@ -676,8 +675,10 @@ func detailScreen(r *Repo, c Commit) bool {
 		case kEnter:
 			d.doCopy(r)
 		case kRight:
-			if n > 0 && previewScreen(r, c, c.Files[d.cur]) {
-				return true
+			if n > 0 && d.cur >= 0 && d.cur < n {
+				if previewScreen(r, c, c.Files[d.cur]) {
+					return true
+				}
 			}
 		case kRune:
 			switch k.r {
@@ -686,18 +687,21 @@ func detailScreen(r *Repo, c Commit) bool {
 			case 'c':
 				d.doCopy(r)
 			case 'v':
-				if n > 0 && previewScreen(r, c, c.Files[d.cur]) {
-					return true
+				if n > 0 && d.cur >= 0 && d.cur < n {
+					if previewScreen(r, c, c.Files[d.cur]) {
+						return true
+					}
 				}
 			case 'a':
-				all := true
+				allSelected := true
 				for _, s := range d.sel {
 					if !s {
-						all = false
+						allSelected = false
+						break
 					}
 				}
 				for i := range d.sel {
-					d.sel[i] = !all
+					d.sel[i] = !allSelected
 				}
 			case 'j':
 				d.cur++
@@ -733,62 +737,182 @@ func colorDiffLines(d string) []string {
 	return out
 }
 
+// Tampilan split view seperti GitHub Desktop
 func previewScreen(r *Repo, c Commit, f File) bool {
-	var lines []string
-	if f.Binary {
-		lines = []string{dim + "Berkas biner — tidak ada pratinjau teks." + reset}
-	} else if d, err := r.diff(c, f.Path); err != nil {
-		lines = []string{red + clean(err.Error()) + reset}
-	} else {
-		lines = colorDiffLines(d)
+	var oldCode, newCode []string
+	
+	// Ambil kode lama dan baru
+	if f.Status != "A" && c.Parent != "" {
+		if old, err := r.show(c.Parent, f.Path); err == nil {
+			oldCode = strings.Split(strings.ToValidUTF8(string(old), "\uFFFD"), "\n")
+		}
 	}
-	top := 0
+	if f.Status != "D" {
+		if nw, err := r.show(c.Hash, f.Path); err == nil {
+			newCode = strings.Split(strings.ToValidUTF8(string(nw), "\uFFFD"), "\n")
+		}
+	}
+	
+	// Highlight diff
+	oldLines := highlightOldCode(oldCode)
+	newLines := highlightNewCode(newCode)
+	
+	viewMode := 0 // 0 = split, 1 = unified diff
+	topOld, topNew := 0, 0
+	
 	for {
 		w, h := termSize()
-		rows := imax(3, h-5)
-		maxTop := imax(0, len(lines)-rows)
-		top = imax(0, imin(top, maxTop))
-		out := []string{
+		rows := imax(3, h-8)
+		midCol := w / 2
+		
+		maxTopOld := imax(0, len(oldLines)-rows)
+		maxTopNew := imax(0, len(newLines)-rows)
+		topOld = imax(0, imin(topOld, maxTopOld))
+		topNew = imax(0, imin(topNew, maxTopNew))
+		
+		lines := []string{
 			titleLine(r, yellow+c.Short+reset+dim+" "+g.arrow+" "+reset+clean(f.Path), "", w),
 			ruleLine(w),
 		}
+		
+		// Header untuk 2 panel
+		header := "   " + bold + "KODE SEBELUMNYA" + reset
+		if viewMode == 0 {
+			header += strings.Repeat(" ", midCol-visLen(header)-22)
+			header += bold + "KODE PERUBAHAN" + reset
+		}
+		lines = append(lines, "   "+dim+header+reset)
+		lines = append(lines, ruleLine(w))
+		
+		// Render 2 panel side by side
 		for i := 0; i < rows; i++ {
-			if top+i < len(lines) {
-				out = append(out, bodyLine(lines[top+i], w))
+			pos := topOld + i
+			leftLine := ""
+			if pos < len(oldLines) {
+				leftLine = oldLines[pos]
+			}
+			
+			if viewMode == 0 {
+				// Split view
+				posNew := topNew + i
+				rightLine := ""
+				if posNew < len(newLines) {
+					rightLine = newLines[posNew]
+				}
+				
+				leftTrunc := truncate(leftLine, midCol-6)
+				rightTrunc := truncate(rightLine, midCol-6)
+				
+				line := "   " + leftTrunc
+				padding := midCol - 6 - visLen(leftTrunc)
+				if padding > 0 {
+					line += strings.Repeat(" ", padding)
+				}
+				line += "  " + rightTrunc
+				lines = append(lines, line)
 			} else {
-				out = append(out, "")
+				// Unified diff (single column)
+				lines = append(lines, "   "+oldLines[topOld+i])
 			}
 		}
-		out = append(out, ruleLine(w))
-		pos := fmt.Sprintf("%s / %s baris", num(imin(top+rows, len(lines))), num(len(lines)))
-		out = append(out, keysLine([][2]string{{g.up + g.down, "gulir"}, {"PgUp/PgDn", "halaman"}, {"Esc", "kembali"}}, pos, w))
-		draw(out, w, h)
+		
+		lines = append(lines, ruleLine(w))
+		
+		// Button salin
+		copyBtn := "[" + bold + cyan + "C" + reset + dim + "opy" + reset + "]"
+		switchBtn := "[" + bold + yellow + "Tab" + reset + dim + "View" + reset + "]"
+		
+		leftInfo := copyBtn + "   " + switchBtn
+		rightInfo := fmt.Sprintf("%d / %d baris", imin(topOld+rows, len(oldLines)), len(oldLines))
+		
+		lines = append(lines, "   "+joinLR(leftInfo, dim+rightInfo+reset, inner(w)))
+		lines = append(lines, keysLine([][2]string{{g.up + g.down, "gulir"}, {"PgUp/PgDn", "halaman"}, {"C", "salin"}, {"Tab", "ubah tampilan"}, {"Esc", "kembali"}}, "", w))
+		
+		draw(lines, w, h)
+		
 		switch k := nextKey(); k.k {
 		case kCtrlC:
 			return true
 		case kEsc, kBack, kLeft:
 			return false
 		case kUp:
-			top--
+			if viewMode == 0 {
+				topOld--
+				topNew--
+			} else {
+				topOld--
+			}
 		case kDown:
-			top++
+			if viewMode == 0 {
+				topOld++
+				topNew++
+			} else {
+				topOld++
+			}
 		case kPgUp:
-			top -= rows
+			topOld -= rows
+			topNew -= rows
 		case kPgDn, kSpace:
-			top += rows
+			topOld += rows
+			topNew += rows
 		case kHome:
-			top = 0
+			topOld = 0
+			topNew = 0
 		case kEnd:
-			top = maxTop
+			topOld = maxTopOld
+			topNew = maxTopNew
+		case kTab:
+			viewMode = 1 - viewMode
+			if viewMode == 1 {
+				// Switch to unified diff
+				if d, err := r.diff(c, f.Path); err == nil {
+					oldLines = colorDiffLines(d)
+				}
+			} else {
+				oldLines = highlightOldCode(oldCode)
+			}
 		case kRune:
 			switch k.r {
 			case 'q', 'Q':
 				return false
+			case 'c', 'C':
+				// Salin kode yang ditampilkan
+				var textToCopy string
+				if viewMode == 0 {
+					// Salin kode baru
+					textToCopy = strings.Join(newCode, "\n")
+				} else {
+					// Salin diff
+					if d, err := r.diff(c, f.Path); err == nil {
+						textToCopy = d
+					}
+				}
+				if err := writeClipboard(textToCopy); err == nil {
+					// Show success message briefly
+				}
 			case 'j':
-				top++
+				topOld++
+				topNew++
 			case 'k':
-				top--
+				topOld--
+				topNew--
 			}
 		}
 	}
 }
+
+func highlightOldCode(lines []string) []string {
+	result := make([]string, len(lines))
+	for i, line := range lines {
+		result[i] = dim + line + reset
+	}
+	return result
+}
+
+func highlightNewCode(lines []string) []string {
+	result := make([]string, len(lines))
+	for i, line := range lines {
+		result[i] = green + line + reset
+	}
+	return result
+}	
